@@ -22,7 +22,7 @@ from tvm.micro.testing.utils import (
     mlf_extract_workspace_size_bytes,
 )
 
-MODEL_INDEX = 4#2
+MODEL_INDEX = 3 #
 
 # Model params
 MODEL_SHORT_NAME = "VWW"
@@ -33,10 +33,14 @@ if MODEL_INDEX == 1:
     MODEL_SHORT_NAME = "KWS"
     MODEL_URL = "https://github.com/mlcommons/tiny/raw/bceb91c5ad2e2deb295547d81505721d3a87d578/benchmark/training/keyword_spotting/trained_models/kws_ref_model.tflite"
     MODEL_FILE_NAME = "kws_ref_model.tflite"
-elif MODEL_INDEX == 3:
+elif MODEL_INDEX == 3: # TODO: revisar por qué no funciona
     MODEL_SHORT_NAME = "AD"
+    # No funciona en Renesas (error de ejecución)
     MODEL_URL = "https://github.com/mlcommons/tiny/raw/bceb91c5ad2e2deb295547d81505721d3a87d578/benchmark/training/anomaly_detection/trained_models/ad01_fp32.tflite"
     MODEL_FILE_NAME = "ad01_fp32.tflite"
+    # No funciona la construcción
+    MODEL_URL = "https://github.com/mlcommons/tiny/raw/bceb91c5ad2e2deb295547d81505721d3a87d578/benchmark/training/anomaly_detection/trained_models/ad01_int8.tflite"
+    MODEL_FILE_NAME = "ad01_int8.tflite"
 elif MODEL_INDEX == 4:
     MODEL_SHORT_NAME = "IC"
     MODEL_URL = "https://github.com/mlcommons/tiny/raw/bceb91c5ad2e2deb295547d81505721d3a87d578/benchmark/training/image_classification/trained_models/pretrainedResnet_quant.tflite"
