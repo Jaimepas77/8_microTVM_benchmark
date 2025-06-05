@@ -1,11 +1,9 @@
 # Variables que se pueden exportar
-# TVM_USE_CMSIS (bool)
 # TVM_MICRO_BOARD (string) - ek_ra8m1
 # 
 import os
 import pathlib
 import tarfile
-import tempfile
 import shutil
 
 import tensorflow as tf
@@ -22,34 +20,28 @@ from tvm.micro.testing.utils import (
     mlf_extract_workspace_size_bytes,
 )
 
-MODEL_INDEX = 3 #
+# Seleccionar el modelo a usar
+MODEL_INDEX = 1 # 1: KWS, 2: VWW, 4: IC
 
-# Model params
-MODEL_SHORT_NAME = "VWW"
-MODEL_URL = "https://github.com/mlcommons/tiny/raw/bceb91c5ad2e2deb295547d81505721d3a87d578/benchmark/training/visual_wake_words/trained_models/vww_96_int8.tflite"
-MODEL_FILE_NAME = "vww_96_int8.tflite"
+# Parámetros del modelo
+MODEL_SHORT_NAME = "ERROR"
+MODEL_URL = ""
+MODEL_FILE_NAME = ""
 
 if MODEL_INDEX == 1:
     MODEL_SHORT_NAME = "KWS"
     MODEL_URL = "https://github.com/mlcommons/tiny/raw/bceb91c5ad2e2deb295547d81505721d3a87d578/benchmark/training/keyword_spotting/trained_models/kws_ref_model.tflite"
     MODEL_FILE_NAME = "kws_ref_model.tflite"
-elif MODEL_INDEX == 3: # TODO: revisar por qué no funciona
-    MODEL_SHORT_NAME = "AD"
-    # No funciona en Renesas (error de ejecución)
-    MODEL_URL = "https://github.com/mlcommons/tiny/raw/bceb91c5ad2e2deb295547d81505721d3a87d578/benchmark/training/anomaly_detection/trained_models/ad01_fp32.tflite"
-    MODEL_FILE_NAME = "ad01_fp32.tflite"
-    # No funciona la construcción
-    MODEL_URL = "https://github.com/mlcommons/tiny/raw/bceb91c5ad2e2deb295547d81505721d3a87d578/benchmark/training/anomaly_detection/trained_models/ad01_int8.tflite"
-    MODEL_FILE_NAME = "ad01_int8.tflite"
+elif MODEL_INDEX == 2:
+    MODEL_SHORT_NAME = "VWW"
+    MODEL_URL = "https://github.com/mlcommons/tiny/raw/bceb91c5ad2e2deb295547d81505721d3a87d578/benchmark/training/visual_wake_words/trained_models/vww_96_int8.tflite"
+    MODEL_FILE_NAME = "vww_96_int8.tflite"
 elif MODEL_INDEX == 4:
     MODEL_SHORT_NAME = "IC"
     MODEL_URL = "https://github.com/mlcommons/tiny/raw/bceb91c5ad2e2deb295547d81505721d3a87d578/benchmark/training/image_classification/trained_models/pretrainedResnet_quant.tflite"
     MODEL_FILE_NAME = "pretrainedResnet_quant.tflite"
 
-MODEL_PATH = download_testdata(MODEL_URL, MODEL_FILE_NAME, module="model")
-
-# Use 'export USE_CMSIS=1' to use CMSIS-NN
-USE_CMSIS = os.environ.get("TVM_USE_CMSIS", False)
+MODEL_PATH = download_testdata(MODEL_URL, MODEL_FILE_NAME, module="model", overwrite=True)
 
 tflite_model_buf = open(MODEL_PATH, "rb").read()
 
@@ -69,46 +61,38 @@ output_name =output_details[0]["name"]
 output_shape = tuple(output_details[0]["shape"])
 output_dtype = np.dtype(output_details[0]["dtype"]).name
 
-# We extract quantization information from TFLite model.
-# This is required for all models except Anomaly Detection,
-# because for other models we send quantized data to interpreter
-# from host, however, for AD model we send floating data and quantization
-# happens on the microcontroller.
-if MODEL_SHORT_NAME != "AD":
-    quant_output_scale = output_details[0]["quantization_parameters"]["scales"][0]
-    quant_output_zero_point = output_details[0]["quantization_parameters"]["zero_points"][0]
+# Extraemos la información de cuantización del modelo TFLite.
+# Esto es necesario porque enviamos datos cuantizados al intérprete
+# desde el host
+quant_output_scale = output_details[0]["quantization_parameters"]["scales"][0]
+quant_output_zero_point = output_details[0]["quantization_parameters"]["zero_points"][0]
 
 relay_mod, params = relay.frontend.from_tflite(
     tflite_model, shape_dict={input_name: input_shape}, dtype_dict={input_name: input_dtype}
 )
 
-# Use the C runtime (crt)
-RUNTIME = Runtime("crt") # AoT case
-# RUNTIME = Runtime("crt", {"system-lib": True}) # Graph case
+# Usar el C runtime (crt)
+RUNTIME = Runtime("crt") # Caso AoT
+# RUNTIME = Runtime("crt", {"system-lib": True}) # Caso Graph
 
-# Use the AoT executor with `unpacked-api=True` and `interface-api=c`. `interface-api=c` forces
-# the compiler to generate C type function APIs and `unpacked-api=True` forces the compiler
-# to generate minimal unpacked format inputs which reduces the stack memory usage on calling
-# inference layers of the model.
+# Usar el ejecutor AoT con `unpacked-api=True` y `interface-api=c`. `interface-api=c` fuerza
+# al compilador a generar APIs de función de tipo C y `unpacked-api=True` fuerza al compilador
+# a generar entradas de formato desempaquetado mínimo, lo que reduce el uso de memoria de pila al llamar
+# a las capas de inferencia del modelo.
 EXECUTOR = Executor(
-    "aot",
-    # "graph", {"link-params": True}, # Creo que graph podría destrozar el benchmarking, no usar
-    {"unpacked-api": True, "interface-api": "c", "workspace-byte-alignment": 8},
+    "aot", {"unpacked-api": True, "interface-api": "c", "workspace-byte-alignment": 8},
+    # "graph", {"link-params": True}, # Creo que graph podría estropear el benchmarking, no usar
 )
 
-# Select a Zephyr board (export TVM_MICRO_BOARD = tuplacafavorita) 
+# Seleccionar una placa Zephyr (export TVM_MICRO_BOARD = tuplacafavorita) 
 BOARD = os.getenv("TVM_MICRO_BOARD", default="nucleo_h743zi") # ek_ra8m1
 
-# Get the full target description using the BOARD
+# Obtener la descripción completa del objetivo usando BOARD
 TARGET = tvm.micro.testing.get_target("zephyr", BOARD)
+# TARGET = tvm.target.Target("c -keys=arm_cpu,cpu -mcpu=cortex-m85")
+# TARGET = tvm.target.Target("llvm -keys=arm_cpu,cpu -mcpu=cortex-m85")
 
 config = {"tir.disable_vectorize": True} 
-if USE_CMSIS:
-    from tvm.relay.op.contrib import cmsisnn
-
-    config["relay.ext.cmsisnn.options"] = {"mcpu": TARGET.mcpu}
-    relay_mod = cmsisnn.partition_for_cmsisnn(relay_mod, params, mcpu=TARGET.mcpu)
-
 with tvm.transform.PassContext(opt_level=3, config=config):
     module = tvm.relay.build(
         relay_mod, target=TARGET, params=params, runtime=RUNTIME, executor=EXECUTOR
@@ -143,36 +127,27 @@ project_options = {
     "project_type": "mlperftiny",
     "board": BOARD,
     "compile_definitions": [
-        f"-DWORKSPACE_SIZE={workspace_size + 512}", 
-        # Memory workspace, 512 is a temporary offset
-        # since the memory calculation is not accurate.
-
-        f"-DTARGET_MODEL={MODEL_INDEX}", # Model index for compilation
-        f"-DTH_MODEL_VERSION=EE_MODEL_VERSION_{MODEL_SHORT_NAME}01", # As required by MLPerfTiny API
-        f"-DMAX_DB_INPUT_SIZE={input_total_size}", # Max size of the input data array
+        f"-DWORKSPACE_SIZE={workspace_size + 512}",
+        f"-DTARGET_MODEL={MODEL_INDEX}", # Índice del modelo para la compilación
+        f"-DTH_MODEL_VERSION=EE_MODEL_VERSION_{MODEL_SHORT_NAME}01", # Como lo requiere la API MLPerfTiny
+        f"-DMAX_DB_INPUT_SIZE={input_total_size}", # Tamaño máximo del array de datos de entrada
     ],
 }
 
+project_options["compile_definitions"].append(f"-DOUT_QUANT_SCALE={quant_output_scale}")
+project_options["compile_definitions"].append(f"-DOUT_QUANT_ZERO={quant_output_zero_point}")
 
-if MODEL_SHORT_NAME != "AD":
-    project_options["compile_definitions"].append(f"-DOUT_QUANT_SCALE={quant_output_scale}")
-    project_options["compile_definitions"].append(f"-DOUT_QUANT_ZERO={quant_output_zero_point}")
-
-if USE_CMSIS:
-    project_options["compile_definitions"].append(f"-DCOMPILE_WITH_CMSISNN=1")
-
-
-# Note: to be adjusted depending on the target board
+# Nota: ajustar según la placa de destino
 project_options["config_main_stack_size"] = 4000
-
-if USE_CMSIS:
-    project_options["cmsis_path"] = os.environ.get("CMSIS_PATH", "/content/cmsis")
 
 generated_project_dir = temp_dir / "project"
 
 project = tvm.micro.project.generate_project_from_mlf(
     template_project_path, generated_project_dir, model_tar_path, project_options
 )
+
+print(f"Proyecto generado en {generated_project_dir}")
+# input("Presiona Enter para continuar...")
 project.build()
 
 if(BOARD == "nucleo_h743zi"):
@@ -182,7 +157,7 @@ elif(BOARD == "ek_ra8m1"):
     with open(f'{generated_project_dir}/build/CMakeCache.txt', 'a') as file:
         file.write('ZEPHYR_BOARD_FLASH_RUNNER:STRING=jlink\n')
 
-#Clean the BUILD directory and extra stuff
+#Limpiar el directorio BUILD y cosas extra
 shutil.rmtree(generated_project_dir / "build")
 (generated_project_dir / "model.tar").unlink()
 
@@ -190,4 +165,4 @@ project_tar_path = pathlib.Path(os.getcwd()) / "project.tar"
 with tarfile.open(project_tar_path, "w:tar") as tar:
     tar.add(generated_project_dir, arcname=os.path.basename("project"))
 
-print(f"The generated project is located here: {project_tar_path}")
+print(f"El proyecto generado se encuentra aquí: {project_tar_path}")
